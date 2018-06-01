@@ -16,9 +16,10 @@ Here you can find more info on SRS in general and how it works:
 - http://www.libsrs2.org/srs/srs.pdf
 
 
+## Status
+
 *STIL UNDER DEVELOPMENT, NOT PRODUCTION READY YET!
 STIL NEEDS SRS1 AND TESTING!*
-
 
 ## Installation <a id="installation"></a>
 ```
@@ -51,6 +52,9 @@ go get github.com/mileusna/srs
             log.Error(err)
             return
         }
+
+        // rvs is normal email address
+        fmt.Println(rvs)
     }
 ```
 
