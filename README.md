@@ -36,14 +36,13 @@ go get github.com/mileusna/srs
         }
         
         // forwarding
+        // this code will produce something like this for fwd address
+        // SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com        
         fwd, err := srs.Forward("milos@mailspot.com")
         if err != nil {
             log.Error(err)
             return
         }
-
-        // this code will produce something like this for fwd address
-        // SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com
 
         // reverse check when emails are bounced back to forwarding server
         rvs, err := srs.Reverse("SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com")
