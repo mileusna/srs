@@ -4,9 +4,9 @@ Sender Rewriting Scheme is a scheme that allows mail transfer agents (MTA) to re
 
 SRS will rewrite email address something like this:
 
-milos@mailspot.com
-
-SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com
+```
+milos@mailspot.com  -> SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com
+```
 
 SRS address contains timestamp and hash signature so only the forwarding domain will be able to reverse the SRS address on bounce and check the integrity.
 
@@ -16,8 +16,8 @@ Here you can find more info on SRS in general and how it works:
 - http://www.libsrs2.org/srs/srs.pdf
 
 
-STIL UNDER DEVELOPMENT, NOT PRODUCTION READY YET!
-STIL NEEDS SRS1 AND TESTING!
+*STIL UNDER DEVELOPMENT, NOT PRODUCTION READY YET!
+STIL NEEDS SRS1 AND TESTING!*
 
 
 ## Installation <a id="installation"></a>
