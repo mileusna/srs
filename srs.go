@@ -1,11 +1,11 @@
 package srs
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"math"
 	"net/mail"
 	"strings"
@@ -19,36 +19,144 @@ type SRS struct {
 	Secret []byte
 	// Domain is localhost which will forward the emails
 	Domain string
-	// MaxAge in days for timestamp validity check. Optional, default 21
-	MaxAge int
 	// HashLength optional, default = 4
 	HashLength int
+	// FirstSeparator after SRS0, can be =+-, default is =
+	FirstSeparator rune
 
 	defaultsChecked bool
 }
 
+// // Forward returns SRS forward address or error
+// func (srs *SRS) Forward(email string) (string, error) {
+// 	srs.setDefaults()
+
+// 	local, hostname, err := parseEmail(email)
+// 	if err != nil {
+// 		return "", err
+// 	}
+
+// 	switch local[:5] {
+// 	case "SRS0=":
+// 		parts := strings.SplitN(local, "=", 5)
+// 		if len(parts) < 5 {
+// 			return "", errors.New("No user in SRS0 address")
+// 		}
+// 		local = strings.TrimPrefix(local, "SRS0")
+// 		hash := srs.hash([]byte(strings.ToLower(hostname + local)))
+// 		return fmt.Sprintf("SRS1=%s=%s==%s=%s=%s=%s@%s", hash, hostname, parts[1], parts[2], parts[3], parts[4], srs.Domain), nil
+
+// 	case "SRS1=":
+// 		return "", errors.New("TODO")
+
+// 	default:
+// 		ts := base32Encode(timestamp())
+// 		return fmt.Sprintf("SRS0=%s=%s=%s=%s@%s", srs.hash([]byte(strings.ToLower(ts+hostname+local))), ts, hostname, local, srs.Domain), nil
+// 	}
+
+// }
+
 // Forward returns SRS forward address or error
 func (srs *SRS) Forward(email string) (string, error) {
-	if !srs.defaultsChecked {
-		srs.setDefaults()
-	}
+	srs.setDefaults()
 
 	local, hostname, err := parseEmail(email)
 	if err != nil {
 		return "", err
 	}
 
-	//SRS0=8Zzm=IS=netmark.rs=milos@localhost.localdomain
+	if hostname == srs.Domain {
+		return email, nil
+	}
 
+	switch local[:5] {
+	case "SRS0=":
+		return srs.rewriteSRS0(local, hostname)
+
+	case "SRS1=":
+		return srs.rewriteSRS1(local, hostname)
+
+	default:
+		return srs.rewrite(local, hostname)
+	}
+
+}
+
+// rewrite email address
+func (srs SRS) rewrite(local, hostname string) (string, error) {
 	ts := base32Encode(timestamp())
-	return fmt.Sprintf("SRS0=%s=%s=%s=%s@%s", srs.hash([]byte(strings.ToLower(ts+hostname+local))), ts, hostname, local, srs.Domain), nil
+	buff := bytes.Buffer{}
+	buff.WriteString("SRS0=")
+	buff.WriteString(srs.hash([]byte(strings.ToLower(ts + hostname + local))))
+	buff.WriteRune('=')
+	buff.WriteString(ts)
+	buff.WriteRune('=')
+	buff.WriteString(hostname)
+	buff.WriteRune('=')
+	buff.WriteString(local)
+	buff.WriteRune('@')
+	buff.WriteString(srs.Domain)
+	return buff.String(), nil
+}
+
+// rewriteSRS0 rewrites SRS0 address to SRS1
+func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
+	parts := strings.SplitN(local, "=", 5)
+	if len(parts) < 5 {
+		return "", errors.New("No user in SRS0 address")
+	}
+	local = strings.TrimPrefix(local, "SRS0")
+	hash := srs.hash([]byte(strings.ToLower(hostname + local)))
+	buff := bytes.Buffer{}
+	buff.WriteString("SRS1=")
+	buff.WriteString(hash)
+	buff.WriteRune('=')
+	buff.WriteString(hostname)
+	buff.WriteString("==")
+	buff.WriteString(parts[1]) // hash from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[2]) // timestamp from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[3]) // local user from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[4]) // hostname from SRS0
+	buff.WriteRune('@')
+	buff.WriteString(srs.Domain)
+	return buff.String(), nil
+	//return fmt.Sprintf("SRS1=%s=%s==%s=%s=%s=%s@%s", hash, hostname, parts[1], parts[2], parts[3], parts[4], srs.Domain), nil
+}
+
+// rewriteSRS1 rewrites SRS1 address to new SRS1
+func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
+	parts := strings.SplitN(local, "=", 5)
+	if len(parts) < 5 {
+		return "", errors.New("No user in SRS0 address")
+	}
+	local = strings.TrimPrefix(local, "SRS0")
+	hash := srs.hash([]byte(strings.ToLower(hostname + local)))
+	buff := bytes.Buffer{}
+	buff.WriteString("SRS1=")
+	buff.WriteString(hash)
+	buff.WriteRune('=')
+	buff.WriteString(hostname)
+	buff.WriteString("==")
+	buff.WriteString(parts[1]) // hash from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[2]) // timestamp from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[3]) // local user from SRS0
+	buff.WriteRune('=')
+	buff.WriteString(parts[4]) // hostname from SRS0
+	buff.WriteRune('@')
+	buff.WriteString(srs.Domain)
+	return buff.String(), nil
+	//return fmt.Sprintf("SRS1=%s=%s==%s=%s=%s=%s@%s", hash, hostname, parts[1], parts[2], parts[3], parts[4], srs.Domain), nil
 }
 
 // Reverse the SRS email address to regular email addresss or error
 func (srs *SRS) Reverse(email string) (string, error) {
-	if !srs.defaultsChecked {
-		srs.setDefaults()
-	}
+
+	srs.setDefaults()
 
 	srs0, _, err := parseEmail(email)
 	if err != nil {
@@ -85,12 +193,18 @@ func (srs SRS) hash(input []byte) string {
 
 // setDefaults parameters if not set
 func (srs *SRS) setDefaults() {
-	if srs.MaxAge == 0 {
-		srs.MaxAge = 21
+	if srs.defaultsChecked {
+		return
 	}
 
 	if srs.HashLength == 0 {
 		srs.HashLength = 4
+	}
+
+	switch srs.FirstSeparator {
+	case '=', '+', '-':
+	default:
+		srs.FirstSeparator = '='
 	}
 
 	srs.defaultsChecked = true
@@ -111,6 +225,7 @@ func parseEmail(e string) (user, domain string, err error) {
 const (
 	timePrecision = float64(60 * 60 * 24)
 	timeSlots     = float64(1024) // dont make mistakes like 2 ^ 10, since in go ^ is not power operator
+	maxAge        = 21
 )
 
 // timestamp integer
@@ -139,7 +254,7 @@ func (srs *SRS) checkTimestamp(ts string) error {
 		now = now + int(timeSlots)
 	}
 
-	if now <= then+srs.MaxAge {
+	if now <= then+maxAge {
 		return nil
 	}
 
