@@ -1,12 +1,10 @@
 package srs
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"math"
 	"net/mail"
 	"strings"
@@ -23,7 +21,7 @@ type SRS struct {
 	// HashLength optional, default = 4
 	HashLength int
 	// FirstSeparator after SRS0, can be =+-, default is =
-	FirstSeparator rune
+	FirstSeparator string
 
 	defaultsChecked bool
 }
@@ -61,9 +59,18 @@ type SRS struct {
 func (srs *SRS) Forward(email string) (string, error) {
 	srs.setDefaults()
 
+	var noDomain bool
+	if strings.HasSuffix(email, "@") {
+		email += srs.Domain
+		noDomain = true
+	}
+
 	local, hostname, err := parseEmail(email)
 	if err != nil {
 		return "", err
+	}
+	if noDomain {
+		hostname = ""
 	}
 
 	if hostname == srs.Domain {
@@ -86,18 +93,7 @@ func (srs *SRS) Forward(email string) (string, error) {
 // rewrite email address
 func (srs SRS) rewrite(local, hostname string) (string, error) {
 	ts := base32Encode(timestamp())
-	buff := bytes.Buffer{}
-	buff.WriteString("SRS0=")
-	buff.WriteString(srs.hash([]byte(strings.ToLower(ts + hostname + local))))
-	buff.WriteRune('=')
-	buff.WriteString(ts)
-	buff.WriteRune('=')
-	buff.WriteString(hostname)
-	buff.WriteRune('=')
-	buff.WriteString(local)
-	buff.WriteRune('@')
-	buff.WriteString(srs.Domain)
-	return buff.String(), nil
+	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + "=" + ts + "=" + hostname + "=" + local + "@" + srs.Domain, nil
 }
 
 // rewriteSRS0 rewrites SRS0 address to SRS1
@@ -107,24 +103,7 @@ func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
 		return "", errors.New("No user in SRS0 address")
 	}
 	hash := srs.hash([]byte(strings.ToLower(hostname + srsLocal)))
-	buff := bytes.Buffer{}
-	buff.WriteString("SRS1=")
-	buff.WriteString(hash)
-	buff.WriteRune('=')
-	buff.WriteString(hostname)
-	buff.WriteString("==")
-	buff.WriteString(srsHash) // hash from SRS0
-	buff.WriteRune('=')
-	buff.WriteString(srsTimestamp) // timestamp from SRS0
-	buff.WriteRune('=')
-	buff.WriteString(srsHost) // hostname from SRS0
-	buff.WriteRune('=')
-	buff.WriteString(srsUser) // local user from SRS0
-	buff.WriteRune('@')
-	buff.WriteString(srs.Domain)
-	fmt.Println(buff.String())
-	return buff.String(), nil
-	//return fmt.Sprintf("SRS1=%s=%s==%s=%s=%s=%s@%s", hash, hostname, parts[1], parts[2], parts[3], parts[4], srs.Domain), nil
+	return "SRS1=" + hash + "=" + hostname + "==" + srsHash + "=" + srsTimestamp + "=" + srsHost + "=" + srsUser + "@" + srs.Domain, nil
 }
 
 // parseSRS0 local part and return hash, ts, host and local
@@ -144,27 +123,10 @@ func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
 	}
 
 	hash := srs.hash([]byte(strings.ToLower(srs1Host + srsLocal)))
-	buff := bytes.Buffer{}
-	buff.WriteString("SRS1=")
-	buff.WriteString(hash)
-	buff.WriteRune('=')
-	buff.WriteString(srs1Host)
-	buff.WriteString("==")
-	buff.WriteString(srsHash) // hash from SRS1
-	buff.WriteRune('=')
-	buff.WriteString(srsTimestamp) // timestamp from SRS1
-	buff.WriteRune('=')
-	buff.WriteString(srsHost) // hostname from SRS1
-	buff.WriteRune('=')
-	buff.WriteString(srsUser) // local user from SRS1
-	buff.WriteRune('@')
-	buff.WriteString(srs.Domain)
-	fmt.Println(buff.String())
-
-	return buff.String(), nil
+	return "SRS1=" + hash + "=" + srs1Host + "==" + srsHash + "=" + srsTimestamp + "=" + srsHost + "=" + srsUser + "@" + srs.Domain, nil
 }
 
-// parseSRS0 local part and return hash, ts, host and local
+// parseSRS1 local part and return hash, ts, host and local
 func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	p := strings.SplitN(local, "==", 2)
 	if len(p) < 2 {
@@ -236,7 +198,6 @@ func (srs SRS) hash(input []byte) string {
 	mac := hmac.New(sha1.New, srs.Secret)
 	mac.Write(input)
 	s := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-
 	return s[:srs.HashLength]
 }
 
@@ -251,9 +212,9 @@ func (srs *SRS) setDefaults() {
 	}
 
 	switch srs.FirstSeparator {
-	case '=', '+', '-':
+	case "=", "+", "-":
 	default:
-		srs.FirstSeparator = '='
+		srs.FirstSeparator = "="
 	}
 
 	srs.defaultsChecked = true
@@ -262,13 +223,15 @@ func (srs *SRS) setDefaults() {
 // parseEmail and return username and domain name
 func parseEmail(e string) (user, domain string, err error) {
 	addr, err := mail.ParseAddress(e)
-	if err == nil {
-		parts := strings.SplitN(addr.Address, "@", 2)
-		if len(parts) == 2 {
-			return parts[0], parts[1], nil
-		}
+	if err != nil {
+		return "", "", errors.New("Bad formated email address")
 	}
-	return "", "", errors.New("Bad formated email address")
+	parts := strings.SplitN(addr.Address, "@", 2)
+	if len(parts) != 2 {
+		return "", "", errors.New("No at sign in sender address")
+
+	}
+	return parts[0], parts[1], nil
 }
 
 const (
