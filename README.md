@@ -56,7 +56,7 @@ go get github.com/mileusna/srs
 ## Testing
 
 Since SRS contains timestamp component it is difficult to test package against static expected results because SRS result will change over time.
-That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, [postsrsd](https://github.com/roehling/postsrsd), and checks the results. As long as you use the same domain name and same secret key, results should match.
+That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, [postsrsd](https://github.com/roehling/postsrsd), and checks the results. As long as you use the same domain name and same secret key, results should match, although there are some exceptions.
 
 ### Exceptions
 
