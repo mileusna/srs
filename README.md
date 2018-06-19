@@ -58,11 +58,28 @@ go get github.com/mileusna/srs
 Since SRS contains timestamp component it is difficult to test package against static expected results because SRS result will change over time.
 That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, [postsrsd](https://github.com/roehling/postsrsd), and checks the results. As long as you use the same domain name and same secret key, results should match.
 
-### Prerequisits
+### Exceptions
+
+There are some cases which postsrsd will accept, but I find them wrong and they won't be supported by this package.
+I guess that postsrsd rely on mailserver to reject this type of email addresses so it doesn't check bad email formats. 
+
+These are some examples which postsrsd will accept, but this go package will return an error due to bad email formatting:
+
+- milos@ // @ sign but no domain
+- milos@netmark.rs@domain.com    // two @ signs
+- milosmileusnic@domain,net     // comma in domain name
+- milos mileusnic@domain.net    // space in user
+- etc.
+
+This types of emails are excluded from testing.
+
+### Testing setup
 - Install postsrsd from https://github.com/roehling/postsrsd or use repo
 for your linux distribution (CentOS https://wiki.mailserver.guru/doku.php/centos:mailserver.guru)
-- Use the same domain and secret key in srs_test.go as postsrsd. Postsrsd key is located in
-/etc/postsrsd.secret
+- Start postsrsd
+- Use the same domain and secret key in `srs_test.go` as postsrsd. Postsrsd key is located in
+`/etc/postsrsd.secret`
+- Add more test emails in `srs_test.go` for testing
 - Run tests
 
 
