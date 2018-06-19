@@ -16,10 +16,6 @@ Here you can find more info on SRS in general and how it works:
 - http://www.libsrs2.org/srs/srs.pdf
 
 
-## Status
-
-*STIL UNDER DEVELOPMENT, NEEDS MORE TESTING*
-
 ## Installation <a id="installation"></a>
 ```
 go get github.com/mileusna/srs
@@ -60,7 +56,7 @@ go get github.com/mileusna/srs
 ## Testing
 
 Since SRS contains timestamp component it is difficult to test package against static expected results because SRS result will change over time.
-That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, postsrsd, and checks the results. As long as you use the same domain name and same secret key, results should match.
+That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, [postsrsd](https://github.com/roehling/postsrsd), and checks the results. As long as you use the same domain name and same secret key, results should match.
 
 ### Prerequisits
 - Install postsrsd from https://github.com/roehling/postsrsd or use repo
