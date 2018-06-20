@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	hashLength = 4
-	sep        = "="
+	hashLength    = 4
+	sep           = "="
+	timePrecision = float64(60 * 60 * 24)
+	timeSlots     = float64(1024) // dont make mistakes like 2 ^ 10, since in go ^ is not power operator
+	maxAge        = 21
 )
 
 // SRS engine
@@ -51,6 +54,10 @@ func (srs *SRS) Forward(email string) (string, error) {
 		return email, nil
 	}
 
+	if len(local) < 5 {
+		return srs.rewrite(local, hostname)
+	}
+
 	switch local[:5] {
 	case "SRS0=", "SRS0+", "SRS0-":
 		return srs.rewriteSRS0(local, hostname)
@@ -61,7 +68,6 @@ func (srs *SRS) Forward(email string) (string, error) {
 	default:
 		return srs.rewrite(local, hostname)
 	}
-
 }
 
 // rewrite email address
@@ -93,7 +99,7 @@ func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost
 func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
 	srsLocal, _, srs1Host, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS1(local)
 	if err != nil {
-		return "", errors.New("No user in SRS1 address")
+		return "", err
 	}
 
 	hash := srs.hash([]byte(strings.ToLower(srs1Host + srsLocal)))
@@ -102,7 +108,6 @@ func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
 
 // parseSRS1 local part and return hash, ts, host and local
 func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
-
 	var srs1Sep, srs1First, srs1Second string
 	for i := 0; i < len(local)-1; i++ {
 		sep := local[i : i+2]
@@ -147,6 +152,10 @@ func (srs *SRS) Reverse(email string) (string, error) {
 		return "", errors.New("Not an SRS address")
 	}
 
+	if len(local) < 5 {
+		return "", errors.New("Not an SRS address")
+	}
+
 	switch local[:5] {
 	case "SRS0=", "SRS0+", "SRS0-":
 		_, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
@@ -179,7 +188,6 @@ func (srs *SRS) Reverse(email string) (string, error) {
 	default:
 		return "", errors.New("Not an SRS address")
 	}
-
 }
 
 func (srs SRS) hash(input []byte) string {
@@ -221,12 +229,6 @@ func parseEmail(e string) (user, domain string, err error) {
 	}
 	return parts[0], parts[1], nil
 }
-
-const (
-	timePrecision = float64(60 * 60 * 24)
-	timeSlots     = float64(1024) // dont make mistakes like 2 ^ 10, since in go ^ is not power operator
-	maxAge        = 21
-)
 
 // timestamp integer
 func timestamp() int {

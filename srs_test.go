@@ -72,6 +72,9 @@ var testBase = []string{
 	"SRS1=8Zzm=IC=netmark.rs=milos@domain.com",
 	"SRS1=wtfisthis=milos@domain.com",
 	"SRS1===@domain.com",
+	"abc@domain.co.uk",
+	"abcd@domain.co.uk",
+	"abcde@domain.co.uk",
 }
 
 // This case are valid in postsrsd but I find them wrong and they won't be supported
