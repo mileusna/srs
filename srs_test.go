@@ -21,18 +21,25 @@ import (
 // Prerequisits:
 // Install postsrsd from https://github.com/roehling/postsrsd or use repo
 // for your linux distribution (CentOS https://wiki.mailserver.guru/doku.php/centos:mailserver.guru)
-// Use the same domain and secret key as postsrsd. Postsrsd key is located in
-// /etc/postsrsd.secret
+// Use the same domain and secret key as postsrsd.
+// Postsrsd config is /etc/sysconfig/postsrsd
+// Postsrsd key is in /etc/postsrsd.secret
 // Run tests
 
-const localdomain = "localhost.localdomain"
+// Params should be the same as in /etc/sysconfig/postsrsd and secret from /etc/postsrsd.secret
+const (
+	localdomain = "localhost.localdomain"
+	secret      = "9/sg9mSnEHHvH4giEP/NzRwY"
+	firstSep    = "="
+)
 
 var srsCli = srs.SRS{
-	Secret: []byte("9/sg9mSnEHHvH4giEP/NzRwY"),
-	Domain: localdomain,
+	Secret:         []byte(secret),
+	Domain:         localdomain,
+	FirstSeparator: firstSep,
 }
 
-// test base, this contains good and bad emails.
+// test base, this contains good and bad emails and SRS0/SRS1 emails
 // Additionald SRS0/SRS1 email addresses will be generated from this list for testing purpouse
 var testBase = []string{
 	"milos@mailspot.com",
@@ -51,10 +58,20 @@ var testBase = []string{
 	"SRS0=8ZzmIS=netmark.rs=milos@" + localdomain,
 	"SRS0=8ZzmIS=netmark.rs=milos@" + localdomain,
 	"SRS0=8Zzm=IS=netmark.rsmilos@" + localdomain,
+	"SRS0+8Zzm=IS=netmark.rs=milos@domain.com",
+	"SRS0+8Zzm=IC=netmark.rs=milos@domain.com",
+	"SRS0+8ZzmIS=netmark.rs=milos@" + localdomain,
+	"SRS0+8ZzmIS=netmark.rs=milos@" + localdomain,
+	"SRS0+8Zzm=IS=netmark.rsmilos@" + localdomain,
 	"SRS0=nrAG=JF=domain.com=hello+world@" + localdomain,
 	"SRS1=50B9=domain.net==8Zzm=IS=netmark.rs=milos@" + localdomain,
 	"SRS1=omnM=domain.com==8Znm=IC=netmark.rs=milos@" + localdomain,
 	"SRS0=8Zzm=II=netmark.rsmilos@" + localdomain,
+	"SRS1=50B9=domain.net==@" + localdomain,
+	"SRS1=ddd9==8Znm=IC=netmark.rs=milos@" + localdomain,
+	"SRS1=8Zzm=IC=netmark.rs=milos@domain.com",
+	"SRS1=wtfisthis=milos@domain.com",
+	"SRS1===@domain.com",
 }
 
 // This case are valid in postsrsd but I find them wrong and they won't be supported
@@ -103,7 +120,7 @@ func testEmails(t *testing.T, emails []string, fn func(string) (string, error), 
 		posrtsrsCode, postsrsdRes := postsrsFn(email)
 		res, err := fn(email)
 		if err != nil {
-			res = err.Error() + "."
+			res = err.Error()
 			code = 500
 		}
 
@@ -119,12 +136,17 @@ func testEmails(t *testing.T, emails []string, fn func(string) (string, error), 
 			continue
 		}
 
-		if code != 200 && code == posrtsrsCode && res != postsrsdRes {
-			log.Println("Notice: Codes returned match but not the same error message (this is OK)")
+		if code != 200 && code == posrtsrsCode && res != strings.TrimSuffix(postsrsdRes, ".") {
+			fmt.Println()
+			fmt.Println("Notice:  ", "Codes returned match but not the same error message (this is OK)")
+			fmt.Println("email:   ", email)
+			fmt.Println("postsrsd:", postsrsdRes)
+			fmt.Println("go:      ", res)
+			fmt.Println()
 			continue
 		}
 
-		if res != postsrsdRes {
+		if code == 200 && res != postsrsdRes {
 			fmt.Println()
 			fmt.Println("email:   ", email)
 			fmt.Println("postsrsd:", postsrsdRes)

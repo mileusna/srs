@@ -12,48 +12,22 @@ import (
 	"unicode"
 )
 
+const (
+	hashLength = 4
+	sep        = "="
+)
+
 // SRS engine
 type SRS struct {
 	// Secret key, mandatory
 	Secret []byte
 	// Domain is localhost which will forward the emails
 	Domain string
-	// HashLength optional, default = 4
-	HashLength int
-	// FirstSeparator after SRS0, can be =+-, default is =
+	// FirstSeparator after SRS0, optional, can be =+-, default is =
 	FirstSeparator string
 
 	defaultsChecked bool
 }
-
-// // Forward returns SRS forward address or error
-// func (srs *SRS) Forward(email string) (string, error) {
-// 	srs.setDefaults()
-
-// 	local, hostname, err := parseEmail(email)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// 	switch local[:5] {
-// 	case "SRS0=":
-// 		parts := strings.SplitN(local, "=", 5)
-// 		if len(parts) < 5 {
-// 			return "", errors.New("No user in SRS0 address")
-// 		}
-// 		local = strings.TrimPrefix(local, "SRS0")
-// 		hash := srs.hash([]byte(strings.ToLower(hostname + local)))
-// 		return fmt.Sprintf("SRS1=%s=%s==%s=%s=%s=%s@%s", hash, hostname, parts[1], parts[2], parts[3], parts[4], srs.Domain), nil
-
-// 	case "SRS1=":
-// 		return "", errors.New("TODO")
-
-// 	default:
-// 		ts := base32Encode(timestamp())
-// 		return fmt.Sprintf("SRS0=%s=%s=%s=%s@%s", srs.hash([]byte(strings.ToLower(ts+hostname+local))), ts, hostname, local, srs.Domain), nil
-// 	}
-
-// }
 
 // Forward returns SRS forward address or error
 func (srs *SRS) Forward(email string) (string, error) {
@@ -78,10 +52,10 @@ func (srs *SRS) Forward(email string) (string, error) {
 	}
 
 	switch local[:5] {
-	case "SRS0=":
+	case "SRS0=", "SRS0+", "SRS0-":
 		return srs.rewriteSRS0(local, hostname)
 
-	case "SRS1=":
+	case "SRS1=", "SRS1+", "SRS1-":
 		return srs.rewriteSRS1(local, hostname)
 
 	default:
@@ -93,7 +67,7 @@ func (srs *SRS) Forward(email string) (string, error) {
 // rewrite email address
 func (srs SRS) rewrite(local, hostname string) (string, error) {
 	ts := base32Encode(timestamp())
-	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + "=" + ts + "=" + hostname + "=" + local + "@" + srs.Domain, nil
+	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + sep + ts + sep + hostname + sep + local + "@" + srs.Domain, nil
 }
 
 // rewriteSRS0 rewrites SRS0 address to SRS1
@@ -103,16 +77,16 @@ func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
 		return "", errors.New("No user in SRS0 address")
 	}
 	hash := srs.hash([]byte(strings.ToLower(hostname + srsLocal)))
-	return "SRS1=" + hash + "=" + hostname + "==" + srsHash + "=" + srsTimestamp + "=" + srsHost + "=" + srsUser + "@" + srs.Domain, nil
+	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
 }
 
 // parseSRS0 local part and return hash, ts, host and local
 func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
-	parts := strings.SplitN(local, "=", 5)
-	if len(parts) < 5 {
+	parts := strings.SplitN(local[5:], sep, 4)
+	if len(parts) < 4 {
 		return "", "", "", "", "", errors.New("No user in SRS0 address")
 	}
-	return strings.TrimPrefix(local, "SRS0"), parts[1], parts[2], parts[3], parts[4], nil
+	return local[4:], parts[0], parts[1], parts[2], parts[3], nil
 }
 
 // rewriteSRS1 rewrites SRS1 address to new SRS1
@@ -123,31 +97,45 @@ func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
 	}
 
 	hash := srs.hash([]byte(strings.ToLower(srs1Host + srsLocal)))
-	return "SRS1=" + hash + "=" + srs1Host + "==" + srsHash + "=" + srsTimestamp + "=" + srsHost + "=" + srsUser + "@" + srs.Domain, nil
+	return "SRS1" + srs.FirstSeparator + hash + sep + srs1Host + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
 }
 
 // parseSRS1 local part and return hash, ts, host and local
 func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
-	p := strings.SplitN(local, "==", 2)
-	if len(p) < 2 {
+
+	var srs1Sep, srs1First, srs1Second string
+	for i := 0; i < len(local)-1; i++ {
+		sep := local[i : i+2]
+		if sep == "==" || sep == "=+" || sep == "=-" {
+			srs1Sep = string(local[i+1])
+			srs1First = local[0:i]
+			srs1Second = local[i+2:]
+			break
+		}
+	}
+
+	if srs1First == "" && srs1Second == "" {
 		return "", "", "", "", "", "", "", errors.New("No user in SRS1 address")
 	}
-	srsLocal = "=" + p[1]
 
-	h := strings.SplitN(strings.TrimPrefix(p[0], "SRS1="), "=", 2)
-	if len(h) < 2 {
-		return "", "", "", "", "", "", "", errors.New("No user in SRS1 address")
+	if len(srs1First) <= 8 {
+		return "", "", "", "", "", "", "", errors.New("Hash too short in SRS address")
 	}
-	srs1Hash = h[0]
-	srs1Host = h[1]
 
-	parts := strings.SplitN(p[1], "=", 4)
+	srsLocal = srs1Sep + srs1Second
+
+	h := strings.SplitN(srs1First[5:], sep, 2)
+	if len(h) == 2 {
+		srs1Hash = h[0]
+		srs1Host = h[1]
+	}
+
+	parts := strings.SplitN(srs1Second, sep, 4)
 	if len(parts) < 4 {
-		return "", "", "", "", "", "", "", errors.New("No user in SRS1 address")
+		return srsLocal, srs1Hash, srs1Host, "", "", "", "", nil
 	}
 
 	return srsLocal, srs1Hash, srs1Host, parts[0], parts[1], parts[2], parts[3], nil
-
 }
 
 // Reverse the SRS email address to regular email addresss or error
@@ -160,7 +148,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 	}
 
 	switch local[:5] {
-	case "SRS0=":
+	case "SRS0=", "SRS0+", "SRS0-":
 		_, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
 		if err != nil {
 			return "", err
@@ -176,7 +164,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 
 		return srsUser + "@" + srsHost, nil
 
-	case "SRS1=":
+	case "SRS1=", "SRS1+", "SRS1-":
 		srsLocal, srs1Hash, srs1Host, _, _, _, _, err := srs.parseSRS1(local)
 		if err != nil {
 			return "", err
@@ -198,17 +186,13 @@ func (srs SRS) hash(input []byte) string {
 	mac := hmac.New(sha1.New, srs.Secret)
 	mac.Write(input)
 	s := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	return s[:srs.HashLength]
+	return s[:hashLength]
 }
 
 // setDefaults parameters if not set
 func (srs *SRS) setDefaults() {
 	if srs.defaultsChecked {
 		return
-	}
-
-	if srs.HashLength == 0 {
-		srs.HashLength = 4
 	}
 
 	switch srs.FirstSeparator {
@@ -222,6 +206,10 @@ func (srs *SRS) setDefaults() {
 
 // parseEmail and return username and domain name
 func parseEmail(e string) (user, domain string, err error) {
+	if !strings.ContainsRune(e, '@') {
+		return "", "", errors.New("No at sign in sender address") // compatibility with postsrsd error message
+	}
+
 	addr, err := mail.ParseAddress(e)
 	if err != nil {
 		return "", "", errors.New("Bad formated email address")
