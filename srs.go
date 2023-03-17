@@ -8,15 +8,27 @@ import (
 	"math"
 	"net/mail"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
+)
+
+var (
+	ErrNoUserInSRS0           = errors.New("no user in SRS0 address")
+	ErrNoUserInSRS1           = errors.New("no user in SRS1 address")
+	ErrHashInvalid            = errors.New("hash invalid in SRS address")
+	ErrHashTooShort           = errors.New("hash too short in SRS address")
+	ErrTimestampWrongSlot     = errors.New("timestamp out of date")
+	ErrTimestampInvalidBase32 = errors.New("bad base32 character in timestamp")
+	ErrNoSRS                  = errors.New("not an SRS address")
+	ErrNoAtSign               = errors.New("no at sign in sender address")
 )
 
 const (
 	hashLength    = 4
 	sep           = "="
 	timePrecision = float64(60 * 60 * 24)
-	timeSlots     = float64(1024) // dont make mistakes like 2 ^ 10, since in go ^ is not power operator
+	timeSlots     = float64(1024) // don't make mistakes like 2 ^ 10, since in go ^ is not power operator
 	maxAge        = 21
 )
 
@@ -28,13 +40,17 @@ type SRS struct {
 	Domain string
 	// FirstSeparator after SRS0, optional, can be =+-, default is =
 	FirstSeparator string
+	// NowFunc gets called when the current time is needed.
+	// Use this to time travel – e.g. for unit tests.
+	// If set to nil (the default) then [time.Now] gets used.
+	NowFunc func() time.Time
 
-	defaultsChecked bool
+	once sync.Once
 }
 
 // Forward returns SRS forward address or error
 func (srs *SRS) Forward(email string) (string, error) {
-	srs.setDefaults()
+	srs.once.Do(srs.setDefaults)
 
 	var noDomain bool
 	if strings.HasSuffix(email, "@") {
@@ -58,7 +74,7 @@ func (srs *SRS) Forward(email string) (string, error) {
 		return srs.rewrite(local, hostname)
 	}
 
-	switch local[:5] {
+	switch strings.ToUpper(local[:5]) {
 	case "SRS0=", "SRS0+", "SRS0-":
 		return srs.rewriteSRS0(local, hostname)
 
@@ -71,43 +87,70 @@ func (srs *SRS) Forward(email string) (string, error) {
 }
 
 // rewrite email address
-func (srs SRS) rewrite(local, hostname string) (string, error) {
-	ts := base32Encode(timestamp())
+func (srs *SRS) rewrite(local, hostname string) (string, error) {
+	ts := base32Encode(timestamp(srs.NowFunc()))
 	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + sep + ts + sep + hostname + sep + local + "@" + srs.Domain, nil
 }
 
-// rewriteSRS0 rewrites SRS0 address to SRS1
-func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
-	srsLocal, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
-	if err != nil {
-		return "", errors.New("No user in SRS0 address")
+// rewriteSRS0 rewrites foreign SRS0 address to SRS1
+func (srs *SRS) rewriteSRS0(local, hostname string) (string, error) {
+	// Spec says:
+	// SRS0 addresses have the form:
+	//
+	//	SRS0=opaque-part@domain-part
+	//
+	// where opaque-part may be defined by the SRS0 forwarder, and may only be interpreted by this same
+	// host. By default, the Guarded mechanism of the Mail::SRS distribution implements this as:
+	//
+	//	SRS0=HHH=TT=orig-domain=orig-local-part@domain-part
+	//
+	// where HHH is a cryptographic hash and TT is a timestamp. The Database mechanism of the Mail::SRS
+	// distribution implements SRS0 as:
+	//
+	//	SRS0=key@domain-part
+	//
+	// where key is a database primary key used for retrieving SRS-related information.
+	// Other implementations are possible.
+	hash := srs.hash([]byte(strings.ToLower(hostname + local[4:])))
+	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + local[5:] + "@" + srs.Domain, nil
+}
+
+// rewriteSRS1 rewrites foreign SRS1 address to new SRS1
+func (srs *SRS) rewriteSRS1(local, hostname string) (string, error) {
+	// Spec says:
+	// SRS1 addresses have the form:
+	//
+	//	SRS1=HHH=orig-local-part==HHH=TT=orig-domain-part=orig-local-part@domain-part
+	//
+	// where HHH is a cryptographic hash, which may be locally defined, since no other host may interpret
+	// it. The double == separator is introduced since the first = is the SRS separator, and the second = is the
+	// custom separator introduced by the SRS0 host and might alternatively be + or -. This double separator
+	// might therefore appear as =+ or =-.
+	// The SRS1 format is rigidly defined by comparison to the SRS0 format and must be adhered to, since
+	// SRS1 addresses must be interpreted by remote hosts under separate administrative control.
+	//
+	// We actually do not need to parse all this to create our SRS1 address of another SRS1 address.
+	parts := strings.SplitN(local[5:], sep, 3)
+	if len(parts) != 3 {
+		return "", ErrNoSRS
 	}
-	hash := srs.hash([]byte(strings.ToLower(hostname + srsLocal)))
-	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
+	srsHost, srsLocal := parts[1], parts[2]
+
+	hash := srs.hash([]byte(strings.ToLower(srsHost + srsLocal)))
+	return "SRS1" + srs.FirstSeparator + hash + sep + srsHost + sep + srsLocal + "@" + srs.Domain, nil
 }
 
 // parseSRS0 local part and return hash, ts, host and local
-func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
+func (srs *SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	parts := strings.SplitN(local[5:], sep, 4)
 	if len(parts) < 4 {
-		return "", "", "", "", "", errors.New("No user in SRS0 address")
+		return "", "", "", "", "", ErrNoUserInSRS0
 	}
 	return local[4:], parts[0], parts[1], parts[2], parts[3], nil
 }
 
-// rewriteSRS1 rewrites SRS1 address to new SRS1
-func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
-	srsLocal, _, srs1Host, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS1(local)
-	if err != nil {
-		return "", err
-	}
-
-	hash := srs.hash([]byte(strings.ToLower(srs1Host + srsLocal)))
-	return "SRS1" + srs.FirstSeparator + hash + sep + srs1Host + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
-}
-
 // parseSRS1 local part and return hash, ts, host and local
-func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
+func (srs *SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	var srs1Sep, srs1First, srs1Second string
 	for i := 0; i < len(local)-1; i++ {
 		sep := local[i : i+2]
@@ -120,11 +163,11 @@ func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, s
 	}
 
 	if srs1First == "" && srs1Second == "" {
-		return "", "", "", "", "", "", "", errors.New("No user in SRS1 address")
+		return "", "", "", "", "", "", "", ErrNoUserInSRS1
 	}
 
 	if len(srs1First) <= 8 {
-		return "", "", "", "", "", "", "", errors.New("Hash too short in SRS address")
+		return "", "", "", "", "", "", "", ErrHashTooShort
 	}
 
 	srsLocal = srs1Sep + srs1Second
@@ -143,20 +186,20 @@ func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, s
 	return srsLocal, srs1Hash, srs1Host, parts[0], parts[1], parts[2], parts[3], nil
 }
 
-// Reverse the SRS email address to regular email addresss or error
+// Reverse the SRS email address to regular email address or error
 func (srs *SRS) Reverse(email string) (string, error) {
-	srs.setDefaults()
+	srs.once.Do(srs.setDefaults)
 
 	local, _, err := parseEmail(email)
 	if err != nil {
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 
 	if len(local) < 5 {
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 
-	switch local[:5] {
+	switch strings.ToUpper(local[:5]) {
 	case "SRS0=", "SRS0+", "SRS0-":
 		_, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
 		if err != nil {
@@ -167,8 +210,8 @@ func (srs *SRS) Reverse(email string) (string, error) {
 			return "", err
 		}
 
-		if srsHash != srs.hash([]byte(strings.ToLower(srsTimestamp+srsHost+srsUser))) {
-			return "", errors.New("Hash invalid in SRS address")
+		if !strings.EqualFold(srsHash, srs.hash([]byte(strings.ToLower(srsTimestamp+srsHost+srsUser)))) {
+			return "", ErrHashInvalid
 		}
 
 		return srsUser + "@" + srsHost, nil
@@ -179,18 +222,18 @@ func (srs *SRS) Reverse(email string) (string, error) {
 			return "", err
 		}
 
-		if srs1Hash != srs.hash([]byte(strings.ToLower(srs1Host+srsLocal))) {
-			return "", errors.New("Hash invalid in SRS address")
+		if !strings.EqualFold(srs1Hash, srs.hash([]byte(strings.ToLower(srs1Host+srsLocal)))) {
+			return "", ErrHashInvalid
 		}
 
 		return "SRS0" + srsLocal + "@" + srs1Host, nil
 
 	default:
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 }
 
-func (srs SRS) hash(input []byte) string {
+func (srs *SRS) hash(input []byte) string {
 	mac := hmac.New(sha1.New, srs.Secret)
 	mac.Write(input)
 	s := base64.StdEncoding.EncodeToString(mac.Sum(nil))
@@ -199,40 +242,37 @@ func (srs SRS) hash(input []byte) string {
 
 // setDefaults parameters if not set
 func (srs *SRS) setDefaults() {
-	if srs.defaultsChecked {
-		return
-	}
-
 	switch srs.FirstSeparator {
 	case "=", "+", "-":
 	default:
 		srs.FirstSeparator = "="
 	}
-
-	srs.defaultsChecked = true
+	if srs.NowFunc == nil {
+		srs.NowFunc = time.Now
+	}
 }
 
 // parseEmail and return username and domain name
 func parseEmail(e string) (user, domain string, err error) {
 	if !strings.ContainsRune(e, '@') {
-		return "", "", errors.New("No at sign in sender address") // compatibility with postsrsd error message
+		return "", "", ErrNoAtSign // compatibility with postsrsd error message
 	}
 
 	addr, err := mail.ParseAddress(e)
 	if err != nil {
-		return "", "", errors.New("Bad formated email address")
+		return "", "", err
 	}
 	parts := strings.SplitN(addr.Address, "@", 2)
 	if len(parts) != 2 {
-		return "", "", errors.New("No at sign in sender address")
-
+		// never happens since we checked that above already
+		return "", "", ErrNoAtSign
 	}
 	return parts[0], parts[1], nil
 }
 
 // timestamp integer
-func timestamp() int {
-	t := float64(time.Now().Unix())
+func timestamp(now time.Time) int {
+	t := float64(now.Unix())
 	x := math.Mod(t/timePrecision, timeSlots)
 	return int(x)
 }
@@ -244,12 +284,12 @@ func (srs *SRS) checkTimestamp(ts string) error {
 	for _, c := range ts {
 		pos := strings.IndexRune(base32, unicode.ToUpper(c))
 		if pos == -1 {
-			return errors.New("Bad base32 character in timestamp")
+			return ErrTimestampInvalidBase32
 		}
 		then = then<<5 | pos
 	}
 
-	now := timestamp()
+	now := timestamp(srs.NowFunc())
 
 	// mind the cycle of time slots
 	for now < then {
@@ -260,7 +300,7 @@ func (srs *SRS) checkTimestamp(ts string) error {
 		return nil
 	}
 
-	return errors.New("Time stamp out of date")
+	return ErrTimestampWrongSlot
 }
 
 const (
