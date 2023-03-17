@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/mail"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -39,13 +40,17 @@ type SRS struct {
 	Domain string
 	// FirstSeparator after SRS0, optional, can be =+-, default is =
 	FirstSeparator string
+	// NowFunc gets called when the current time is needed.
+	// Use this to time travel – e.g. for unit tests.
+	// If set to nil (the default) then [time.Now] gets used.
+	NowFunc func() time.Time
 
-	defaultsChecked bool
+	once sync.Once
 }
 
 // Forward returns SRS forward address or error
 func (srs *SRS) Forward(email string) (string, error) {
-	srs.setDefaults()
+	srs.once.Do(srs.setDefaults)
 
 	var noDomain bool
 	if strings.HasSuffix(email, "@") {
@@ -83,7 +88,7 @@ func (srs *SRS) Forward(email string) (string, error) {
 
 // rewrite email address
 func (srs *SRS) rewrite(local, hostname string) (string, error) {
-	ts := base32Encode(timestamp())
+	ts := base32Encode(timestamp(srs.NowFunc()))
 	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + sep + ts + sep + hostname + sep + local + "@" + srs.Domain, nil
 }
 
@@ -156,7 +161,7 @@ func (srs *SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, 
 
 // Reverse the SRS email address to regular email address or error
 func (srs *SRS) Reverse(email string) (string, error) {
-	srs.setDefaults()
+	srs.once.Do(srs.setDefaults)
 
 	local, _, err := parseEmail(email)
 	if err != nil {
@@ -210,17 +215,14 @@ func (srs *SRS) hash(input []byte) string {
 
 // setDefaults parameters if not set
 func (srs *SRS) setDefaults() {
-	if srs.defaultsChecked {
-		return
-	}
-
 	switch srs.FirstSeparator {
 	case "=", "+", "-":
 	default:
 		srs.FirstSeparator = "="
 	}
-
-	srs.defaultsChecked = true
+	if srs.NowFunc == nil {
+		srs.NowFunc = time.Now
+	}
 }
 
 // parseEmail and return username and domain name
@@ -242,8 +244,8 @@ func parseEmail(e string) (user, domain string, err error) {
 }
 
 // timestamp integer
-func timestamp() int {
-	t := float64(time.Now().Unix())
+func timestamp(now time.Time) int {
+	t := float64(now.Unix())
 	x := math.Mod(t/timePrecision, timeSlots)
 	return int(x)
 }
@@ -260,7 +262,7 @@ func (srs *SRS) checkTimestamp(ts string) error {
 		then = then<<5 | pos
 	}
 
-	now := timestamp()
+	now := timestamp(srs.NowFunc())
 
 	// mind the cycle of time slots
 	for now < then {
