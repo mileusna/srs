@@ -27,7 +27,7 @@ const (
 	hashLength    = 4
 	sep           = "="
 	timePrecision = float64(60 * 60 * 24)
-	timeSlots     = float64(1024) // dont make mistakes like 2 ^ 10, since in go ^ is not power operator
+	timeSlots     = float64(1024) // don't make mistakes like 2 ^ 10, since in go ^ is not power operator
 	maxAge        = 21
 )
 
@@ -82,13 +82,13 @@ func (srs *SRS) Forward(email string) (string, error) {
 }
 
 // rewrite email address
-func (srs SRS) rewrite(local, hostname string) (string, error) {
+func (srs *SRS) rewrite(local, hostname string) (string, error) {
 	ts := base32Encode(timestamp())
 	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + sep + ts + sep + hostname + sep + local + "@" + srs.Domain, nil
 }
 
 // rewriteSRS0 rewrites SRS0 address to SRS1
-func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
+func (srs *SRS) rewriteSRS0(local, hostname string) (string, error) {
 	srsLocal, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
 	if err != nil {
 		return "", ErrNoUserInSRS0
@@ -98,7 +98,7 @@ func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
 }
 
 // parseSRS0 local part and return hash, ts, host and local
-func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
+func (srs *SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	parts := strings.SplitN(local[5:], sep, 4)
 	if len(parts) < 4 {
 		return "", "", "", "", "", ErrNoUserInSRS0
@@ -107,7 +107,7 @@ func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost
 }
 
 // rewriteSRS1 rewrites SRS1 address to new SRS1
-func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
+func (srs *SRS) rewriteSRS1(local, hostname string) (string, error) {
 	srsLocal, _, srs1Host, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS1(local)
 	if err != nil {
 		return "", err
@@ -118,7 +118,7 @@ func (srs SRS) rewriteSRS1(local, hostname string) (string, error) {
 }
 
 // parseSRS1 local part and return hash, ts, host and local
-func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
+func (srs *SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	var srs1Sep, srs1First, srs1Second string
 	for i := 0; i < len(local)-1; i++ {
 		sep := local[i : i+2]
@@ -154,7 +154,7 @@ func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, s
 	return srsLocal, srs1Hash, srs1Host, parts[0], parts[1], parts[2], parts[3], nil
 }
 
-// Reverse the SRS email address to regular email addresss or error
+// Reverse the SRS email address to regular email address or error
 func (srs *SRS) Reverse(email string) (string, error) {
 	srs.setDefaults()
 
@@ -201,7 +201,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 	}
 }
 
-func (srs SRS) hash(input []byte) string {
+func (srs *SRS) hash(input []byte) string {
 	mac := hmac.New(sha1.New, srs.Secret)
 	mac.Write(input)
 	s := base64.StdEncoding.EncodeToString(mac.Sum(nil))

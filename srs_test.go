@@ -14,11 +14,11 @@ import (
 
 // Since SRS contains timestamp component, it is difficult to test package
 // against static expected results because SRS result change over time.
-// That is the reasons why this tests acutally connects to most populpar SRS
+// That is the reasons why this tests actually connects to most popular SRS
 // daemon for Postfix, postsrsd, and checks the results. As long as you use the
 // same domain name and same secret key, results have to match.
 
-// Prerequisits:
+// Prerequisites:
 // Install postsrsd from https://github.com/roehling/postsrsd or use repo
 // for your linux distribution (CentOS https://wiki.mailserver.guru/doku.php/centos:mailserver.guru)
 // Use the same domain and secret key as postsrsd.
@@ -40,7 +40,7 @@ var srsCli = srs.SRS{
 }
 
 // test base, this contains good and bad emails and SRS0/SRS1 emails
-// Additionald SRS0/SRS1 email addresses will be generated from this list for testing purpouse
+// Additional SRS0/SRS1 email addresses will be generated from this list for testing purpose
 var testBase = []string{
 	"milos@mailspot.com",
 	"milos@NASLOVI.NET",  // uppercase
@@ -77,14 +77,14 @@ var testBase = []string{
 	"abcde@domain.co.uk",
 }
 
-// This case are valid in postsrsd but I find them wrong and they won't be supported
+// This case are valid in postsrsd, but I find them wrong and they won't be supported.
 // I guess that postsrsd rely on postfix to reject this type of email
-// addresses so it doesn't check bad email formats
-// "SRS08Zcm=IS=netmark.rs=milos@", // no domain
-// "milos@",                        // no domain
-// "milos@netmark.rs@domain.com",   // two @ signs
-// "milosmileusnic@domain,net",     // comma in domain name
-// "milos mileusnic@domain.net",    // space in email
+// addresses, so it doesn't check bad email formats:
+//  "SRS08Zcm=IS=netmark.rs=milos@", // no domain
+//  "milos@",                        // no domain
+//  "milos@netmark.rs@domain.com",   // two @ signs
+//  "milosmileusnic@domain,net",     // comma in domain name
+//  "milos mileusnic@domain.net",    // space in email
 
 func generateEmails(srs srs.SRS) []string {
 
