@@ -12,6 +12,17 @@ import (
 	"unicode"
 )
 
+var (
+	ErrNoUserInSRS0           = errors.New("no user in SRS0 address")
+	ErrNoUserInSRS1           = errors.New("no user in SRS1 address")
+	ErrHashInvalid            = errors.New("hash invalid in SRS address")
+	ErrHashTooShort           = errors.New("hash too short in SRS address")
+	ErrTimestampWrongSlot     = errors.New("timestamp out of date")
+	ErrTimestampInvalidBase32 = errors.New("bad base32 character in timestamp")
+	ErrNoSRS                  = errors.New("not an SRS address")
+	ErrNoAtSign               = errors.New("no at sign in sender address")
+)
+
 const (
 	hashLength    = 4
 	sep           = "="
@@ -80,7 +91,7 @@ func (srs SRS) rewrite(local, hostname string) (string, error) {
 func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
 	srsLocal, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
 	if err != nil {
-		return "", errors.New("No user in SRS0 address")
+		return "", ErrNoUserInSRS0
 	}
 	hash := srs.hash([]byte(strings.ToLower(hostname + srsLocal)))
 	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
@@ -90,7 +101,7 @@ func (srs SRS) rewriteSRS0(local, hostname string) (string, error) {
 func (srs SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHost, srsUser string, err error) {
 	parts := strings.SplitN(local[5:], sep, 4)
 	if len(parts) < 4 {
-		return "", "", "", "", "", errors.New("No user in SRS0 address")
+		return "", "", "", "", "", ErrNoUserInSRS0
 	}
 	return local[4:], parts[0], parts[1], parts[2], parts[3], nil
 }
@@ -120,11 +131,11 @@ func (srs SRS) parseSRS1(local string) (srsLocal, srs1Hash, srs1Host, srsHash, s
 	}
 
 	if srs1First == "" && srs1Second == "" {
-		return "", "", "", "", "", "", "", errors.New("No user in SRS1 address")
+		return "", "", "", "", "", "", "", ErrNoUserInSRS1
 	}
 
 	if len(srs1First) <= 8 {
-		return "", "", "", "", "", "", "", errors.New("Hash too short in SRS address")
+		return "", "", "", "", "", "", "", ErrHashTooShort
 	}
 
 	srsLocal = srs1Sep + srs1Second
@@ -149,11 +160,11 @@ func (srs *SRS) Reverse(email string) (string, error) {
 
 	local, _, err := parseEmail(email)
 	if err != nil {
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 
 	if len(local) < 5 {
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 
 	switch local[:5] {
@@ -168,7 +179,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 		}
 
 		if srsHash != srs.hash([]byte(strings.ToLower(srsTimestamp+srsHost+srsUser))) {
-			return "", errors.New("Hash invalid in SRS address")
+			return "", ErrHashInvalid
 		}
 
 		return srsUser + "@" + srsHost, nil
@@ -180,13 +191,13 @@ func (srs *SRS) Reverse(email string) (string, error) {
 		}
 
 		if srs1Hash != srs.hash([]byte(strings.ToLower(srs1Host+srsLocal))) {
-			return "", errors.New("Hash invalid in SRS address")
+			return "", ErrHashInvalid
 		}
 
 		return "SRS0" + srsLocal + "@" + srs1Host, nil
 
 	default:
-		return "", errors.New("Not an SRS address")
+		return "", ErrNoSRS
 	}
 }
 
@@ -215,16 +226,16 @@ func (srs *SRS) setDefaults() {
 // parseEmail and return username and domain name
 func parseEmail(e string) (user, domain string, err error) {
 	if !strings.ContainsRune(e, '@') {
-		return "", "", errors.New("No at sign in sender address") // compatibility with postsrsd error message
+		return "", "", ErrNoAtSign // compatibility with postsrsd error message
 	}
 
 	addr, err := mail.ParseAddress(e)
 	if err != nil {
-		return "", "", errors.New("Bad formated email address")
+		return "", "", err
 	}
 	parts := strings.SplitN(addr.Address, "@", 2)
 	if len(parts) != 2 {
-		return "", "", errors.New("No at sign in sender address")
+		return "", "", ErrNoAtSign
 
 	}
 	return parts[0], parts[1], nil
@@ -244,7 +255,7 @@ func (srs *SRS) checkTimestamp(ts string) error {
 	for _, c := range ts {
 		pos := strings.IndexRune(base32, unicode.ToUpper(c))
 		if pos == -1 {
-			return errors.New("Bad base32 character in timestamp")
+			return ErrTimestampInvalidBase32
 		}
 		then = then<<5 | pos
 	}
@@ -260,7 +271,7 @@ func (srs *SRS) checkTimestamp(ts string) error {
 		return nil
 	}
 
-	return errors.New("Time stamp out of date")
+	return ErrTimestampWrongSlot
 }
 
 const (
