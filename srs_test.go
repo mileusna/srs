@@ -33,6 +33,8 @@ func TestSRS_Forward(t *testing.T) {
 		{"Test long address", "test@" + as + ".net", "SRS0=G7tR=2W=" + as + ".net=test@example.com", false},
 		// TODO: {"Test too long address", "test@" + as + "a.net", "", true},
 		{"Special case of local domain (is this ok?)", "test@", "SRS0=RrXq=2W==test@example.com", false},
+		{"Regular rewrite longer address", "testing@otherdomain.com", "SRS0=rNNq=2W=otherdomain.com=testing@example.com", false},
+		{"Invalid SRS1", "SRS1=X=thirddomain.com@otherdomain.com", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -82,6 +84,9 @@ func TestSRS_Reverse(t *testing.T) {
 		{"Empty", "", "", true},
 		{"No email", "some random string", "", true},
 		{"No SRS", "something@localhost", "", true},
+		{"Bogus SRS1", "SRS1-@example.com", "", true},
+		{"Reject wrong hash of SRS1", "SRS1=XXXX=thirddomain.com==opaque+string@example.com", "", true},
+		{"Reject wrong timestamp of SRS0", "SRS0=XjO9=00=otherdomain.com=test@example.com", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,5 +110,34 @@ func TestSRS_setDefaults(t *testing.T) {
 	}
 	if s.NowFunc == nil {
 		t.Errorf("s.NowFunc = nil, want time.Now")
+	}
+}
+
+func Test_parseEmail(t *testing.T) {
+	tests := []struct {
+		name       string
+		in         string
+		wantUser   string
+		wantDomain string
+		wantErr    bool
+	}{
+		{"no @", "no-at", "", "", true},
+		{"mail.ParseAddress error", "(test@domain", "", "", true},
+		{"works", "test@domain", "test", "domain", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUser, gotDomain, err := parseEmail(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseEmail() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotUser != tt.wantUser {
+				t.Errorf("parseEmail() gotUser = %v, want %v", gotUser, tt.wantUser)
+			}
+			if gotDomain != tt.wantDomain {
+				t.Errorf("parseEmail() gotDomain = %v, want %v", gotDomain, tt.wantDomain)
+			}
+		})
 	}
 }

@@ -264,8 +264,8 @@ func parseEmail(e string) (user, domain string, err error) {
 	}
 	parts := strings.SplitN(addr.Address, "@", 2)
 	if len(parts) != 2 {
+		// never happens since we checked that above already
 		return "", "", ErrNoAtSign
-
 	}
 	return parts[0], parts[1], nil
 }
