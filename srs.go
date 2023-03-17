@@ -92,14 +92,52 @@ func (srs *SRS) rewrite(local, hostname string) (string, error) {
 	return "SRS0" + srs.FirstSeparator + srs.hash([]byte(strings.ToLower(ts+hostname+local))) + sep + ts + sep + hostname + sep + local + "@" + srs.Domain, nil
 }
 
-// rewriteSRS0 rewrites SRS0 address to SRS1
+// rewriteSRS0 rewrites foreign SRS0 address to SRS1
 func (srs *SRS) rewriteSRS0(local, hostname string) (string, error) {
-	srsLocal, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
-	if err != nil {
-		return "", ErrNoUserInSRS0
+	// Spec says:
+	// SRS0 addresses have the form:
+	//
+	//	SRS0=opaque-part@domain-part
+	//
+	// where opaque-part may be defined by the SRS0 forwarder, and may only be interpreted by this same
+	// host. By default, the Guarded mechanism of the Mail::SRS distribution implements this as:
+	//
+	//	SRS0=HHH=TT=orig-domain=orig-local-part@domain-part
+	//
+	// where HHH is a cryptographic hash and TT is a timestamp. The Database mechanism of the Mail::SRS
+	// distribution implements SRS0 as:
+	//
+	//	SRS0=key@domain-part
+	//
+	// where key is a database primary key used for retrieving SRS-related information.
+	// Other implementations are possible.
+	hash := srs.hash([]byte(strings.ToLower(hostname + local[4:])))
+	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + local[5:] + "@" + srs.Domain, nil
+}
+
+// rewriteSRS1 rewrites foreign SRS1 address to new SRS1
+func (srs *SRS) rewriteSRS1(local, hostname string) (string, error) {
+	// Spec says:
+	// SRS1 addresses have the form:
+	//
+	//	SRS1=HHH=orig-local-part==HHH=TT=orig-domain-part=orig-local-part@domain-part
+	//
+	// where HHH is a cryptographic hash, which may be locally defined, since no other host may interpret
+	// it. The double == separator is introduced since the first = is the SRS separator, and the second = is the
+	// custom separator introduced by the SRS0 host and might alternatively be + or -. This double separator
+	// might therefore appear as =+ or =-.
+	// The SRS1 format is rigidly defined by comparison to the SRS0 format and must be adhered to, since
+	// SRS1 addresses must be interpreted by remote hosts under separate administrative control.
+	//
+	// We actually do not need to parse all this to create our SRS1 address of another SRS1 address.
+	parts := strings.SplitN(local[5:], sep, 3)
+	if len(parts) != 3 {
+		return "", ErrNoSRS
 	}
-	hash := srs.hash([]byte(strings.ToLower(hostname + srsLocal)))
-	return "SRS1" + srs.FirstSeparator + hash + sep + hostname + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
+	srsHost, srsLocal := parts[1], parts[2]
+
+	hash := srs.hash([]byte(strings.ToLower(srsHost + srsLocal)))
+	return "SRS1" + srs.FirstSeparator + hash + sep + srsHost + sep + srsLocal + "@" + srs.Domain, nil
 }
 
 // parseSRS0 local part and return hash, ts, host and local
@@ -109,17 +147,6 @@ func (srs *SRS) parseSRS0(local string) (srsLocal, srsHash, srsTimestamp, srsHos
 		return "", "", "", "", "", ErrNoUserInSRS0
 	}
 	return local[4:], parts[0], parts[1], parts[2], parts[3], nil
-}
-
-// rewriteSRS1 rewrites SRS1 address to new SRS1
-func (srs *SRS) rewriteSRS1(local, hostname string) (string, error) {
-	srsLocal, _, srs1Host, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS1(local)
-	if err != nil {
-		return "", err
-	}
-
-	hash := srs.hash([]byte(strings.ToLower(srs1Host + srsLocal)))
-	return "SRS1" + srs.FirstSeparator + hash + sep + srs1Host + sep + string(local[4]) + srsHash + sep + srsTimestamp + sep + srsHost + sep + srsUser + "@" + srs.Domain, nil
 }
 
 // parseSRS1 local part and return hash, ts, host and local
