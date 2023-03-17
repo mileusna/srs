@@ -26,7 +26,7 @@ go get github.com/mileusna/srs
 ```go
     func main() {
         // setting up engine with mandatory params
-        srs := srs.SRS{
+        s := srs.SRS{
             Secret: []byte("YourSecretKeyForHashingUniqueAndPermanentPerServer"), 
             Domain: "forwarding-domain.com",
         }
@@ -34,18 +34,16 @@ go get github.com/mileusna/srs
         // forwarding
         // this code will produce something like this for fwd address
         // SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com        
-        fwd, err := srs.Forward("milos@mailspot.com")
+        fwd, err := s.Forward("milos@mailspot.com")
         if err != nil {
-            log.Error(err)
-            return
+            log.Fatal(err)
         }
 
         // reverse check when emails are bounced back to forwarding server
-        rvs, err := srs.Reverse("SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com")
+        rvs, err := s.Reverse("SRS0=JvSE=IT=mailspot.com=milos@forwarding-domain.com")
         if err != nil {
             // email is not SRS, invalid hash, invalid timestamp, timestamp out of date, etc..
-            log.Error(err)
-            return
+            log.Fatal(err)
         }
 
         // rvs is normal email address
@@ -53,15 +51,10 @@ go get github.com/mileusna/srs
     }
 ```
 
-## Testing
-
-Since SRS contains timestamp component it is difficult to test package against static expected results because SRS result will change over time.
-That is the reasons why the tests actually connects to most popular SRS daemon for Postfix, [postsrsd](https://github.com/roehling/postsrsd), and checks the results. As long as you use the same domain name and same secret key, results should match, although there are some exceptions.
-
 ### Exceptions
 
 There are some cases which postsrsd will accept, but I find them wrong and they won't be supported by this package.
-I guess that postsrsd rely on mailserver to reject this type of email addresses so it doesn't check bad email formats. 
+I guess that postsrsd rely on mail server to reject this type of email addresses so it doesn't check bad email formats. 
 
 These are some examples which postsrsd will accept, but this go package will return an error due to bad email formatting:
 
@@ -70,16 +63,3 @@ These are some examples which postsrsd will accept, but this go package will ret
 - milosmileusnic@domain,net     // comma in domain name
 - milos mileusnic@domain.net    // space in user
 - etc.
-
-This types of emails are excluded from testing.
-
-### Testing setup
-- Install postsrsd from https://github.com/roehling/postsrsd or use repo
-for your linux distribution (CentOS https://wiki.mailserver.guru/doku.php/centos:mailserver.guru)
-- Start postsrsd
-- Use the same domain and secret key in `srs_test.go` as postsrsd. Postsrsd key is located in
-`/etc/postsrsd.secret`
-- Add more test emails in `srs_test.go` for testing
-- Run tests
-
-

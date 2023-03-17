@@ -1,191 +1,109 @@
-package srs_test
+package srs
 
 import (
-	"bufio"
-	"fmt"
-	"log"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/mileusna/srs"
+	"time"
 )
 
-// Since SRS contains timestamp component, it is difficult to test package
-// against static expected results because SRS result change over time.
-// That is the reasons why this tests actually connects to most popular SRS
-// daemon for Postfix, postsrsd, and checks the results. As long as you use the
-// same domain name and same secret key, results have to match.
+var as = strings.Repeat("a", 512-9)
 
-// Prerequisites:
-// Install postsrsd from https://github.com/roehling/postsrsd or use repo
-// for your linux distribution (CentOS https://wiki.mailserver.guru/doku.php/centos:mailserver.guru)
-// Use the same domain and secret key as postsrsd.
-// Postsrsd config is /etc/sysconfig/postsrsd
-// Postsrsd key is in /etc/postsrsd.secret
-// Run tests
-
-// Params should be the same as in /etc/sysconfig/postsrsd and secret from /etc/postsrsd.secret
-const (
-	localdomain = "localhost.localdomain"
-	secret      = "9/sg9mSnEHHvH4giEP/NzRwY"
-	firstSep    = "="
-)
-
-var srsCli = srs.SRS{
-	Secret:         []byte(secret),
-	Domain:         localdomain,
-	FirstSeparator: firstSep,
-}
-
-// test base, this contains good and bad emails and SRS0/SRS1 emails
-// Additional SRS0/SRS1 email addresses will be generated from this list for testing purpose
-var testBase = []string{
-	"milos@mailspot.com",
-	"milos@NASLOVI.NET",  // uppercase
-	"Milos@MailSpot.com", // mixed case
-	"milos@localhost.localdomain",
-	"myemail@domain.com",
-	"myemail@domain.co.uk",
-	"myemail@domain.co.uk",
-	"milos.mileusnic@domain.co.uk",
-	"milosmileusnic@domain",
-	"hello+world@domain.com",
-	"asdijaoisjd asidj oaisjd",
-	"SRS0=8Zzm=IS=netmark.rs=milos@domain.com",
-	"SRS0=8Zzm=IC=netmark.rs=milos@domain.com",
-	"SRS0=8ZzmIS=netmark.rs=milos@" + localdomain,
-	"SRS0=8ZzmIS=netmark.rs=milos@" + localdomain,
-	"SRS0=8Zzm=IS=netmark.rsmilos@" + localdomain,
-	"SRS0+8Zzm=IS=netmark.rs=milos@domain.com",
-	"SRS0+8Zzm=IC=netmark.rs=milos@domain.com",
-	"SRS0+8ZzmIS=netmark.rs=milos@" + localdomain,
-	"SRS0+8ZzmIS=netmark.rs=milos@" + localdomain,
-	"SRS0+8Zzm=IS=netmark.rsmilos@" + localdomain,
-	"SRS0=nrAG=JF=domain.com=hello+world@" + localdomain,
-	"SRS1=50B9=domain.net==8Zzm=IS=netmark.rs=milos@" + localdomain,
-	"SRS1=omnM=domain.com==8Znm=IC=netmark.rs=milos@" + localdomain,
-	"SRS0=8Zzm=II=netmark.rsmilos@" + localdomain,
-	"SRS1=50B9=domain.net==@" + localdomain,
-	"SRS1=ddd9==8Znm=IC=netmark.rs=milos@" + localdomain,
-	"SRS1=8Zzm=IC=netmark.rs=milos@domain.com",
-	"SRS1=wtfisthis=milos@domain.com",
-	"SRS1===@domain.com",
-	"abc@domain.co.uk",
-	"abcd@domain.co.uk",
-	"abcde@domain.co.uk",
-}
-
-// This case are valid in postsrsd, but I find them wrong and they won't be supported.
-// I guess that postsrsd rely on postfix to reject this type of email
-// addresses, so it doesn't check bad email formats:
-//  "SRS08Zcm=IS=netmark.rs=milos@", // no domain
-//  "milos@",                        // no domain
-//  "milos@netmark.rs@domain.com",   // two @ signs
-//  "milosmileusnic@domain,net",     // comma in domain name
-//  "milos mileusnic@domain.net",    // space in email
-
-func generateEmails(srs srs.SRS) []string {
-
-	emails := testBase
-
-	// add SRS0 emails to test list
-	var srs0Emails []string
-	for _, e := range emails {
-		if fwd, err := srs.Forward(e); err == nil {
-			srs0Emails = append(srs0Emails, fwd)
-		}
+func TestSRS_Forward(t *testing.T) {
+	// configuration the same as in PostSRS blackbox test
+	var srs = SRS{
+		Secret:         []byte("tops3cr3t"),
+		Domain:         "example.com",
+		FirstSeparator: "=",
+		NowFunc: func() time.Time {
+			return time.Date(2020, time.January, 1, 0, 1, 0, 0, time.UTC)
+		},
 	}
-	emails = append(emails, srs0Emails...)
-
-	// add SRS1 emails to test list
-	var srs1Emails []string
-	for _, e := range srs0Emails {
-		if fwd, err := srs.Forward(e); err == nil {
-			srs1Emails = append(srs1Emails, fwd)
-		}
+	tests := []struct {
+		name    string
+		email   string
+		want    string
+		wantErr bool
+	}{
+		{"Need not rewrite local domain", "test@example.com", "test@example.com", false},
+		{"Regular rewrite", "test@otherdomain.com", "SRS0=vmyz=2W=otherdomain.com=test@example.com", false},
+		{"No rewrite for mail address without domain", "foo", "", true},
+		{"Test empty address", "", "", true},
+		{"Convert foreign SRS0 address to SRS1 address", "SRS0=opaque+string@otherdomain.com", "SRS1=chaI=otherdomain.com==opaque+string@example.com", false},
+		{"Change domain part of foreign SRS1 address", "SRS1=X=thirddomain.com==opaque+string@otherdomain.com", "SRS1=JIBX=thirddomain.com==opaque+string@example.com", false},
+		{"Test long address", "test@" + as + ".net", "SRS0=G7tR=2W=" + as + ".net=test@example.com", false},
+		// TODO: {"Test too long address", "test@" + as + "a.net", "", true},
+		{"Special case of local domain (is this ok?)", "test@", "SRS0=RrXq=2W==test@example.com", false},
 	}
-	return append(emails, srs1Emails...)
-}
-
-func TestForward(t *testing.T) {
-	testEmails(t, generateEmails(srsCli), srsCli.Forward, postSRSForward)
-}
-
-func TestReverse(t *testing.T) {
-	testEmails(t, generateEmails(srsCli), srsCli.Reverse, postSRSReverse)
-}
-
-func testEmails(t *testing.T, emails []string, fn func(string) (string, error), postsrsFn func(string) (int, string)) {
-	for _, email := range emails {
-		code := 200
-		posrtsrsCode, postsrsdRes := postsrsFn(email)
-		res, err := fn(email)
-		if err != nil {
-			res = err.Error()
-			code = 500
-		}
-
-		//fmt.Println(res)
-
-		if code != posrtsrsCode {
-			fmt.Println()
-			fmt.Println("email:   ", email)
-			fmt.Println("postsrsd:", postsrsdRes)
-			fmt.Println("go:      ", res)
-			fmt.Println()
-			t.Error("Codes returned don't match")
-			continue
-		}
-
-		if code != 200 && code == posrtsrsCode && res != strings.TrimSuffix(postsrsdRes, ".") {
-			fmt.Println()
-			fmt.Println("Notice:  ", "Codes returned match but not the same error message (this is OK)")
-			fmt.Println("email:   ", email)
-			fmt.Println("postsrsd:", postsrsdRes)
-			fmt.Println("go:      ", res)
-			fmt.Println()
-			continue
-		}
-
-		if code == 200 && res != postsrsdRes {
-			fmt.Println()
-			fmt.Println("email:   ", email)
-			fmt.Println("postsrsd:", postsrsdRes)
-			fmt.Println("go:      ", res)
-			fmt.Println()
-			t.Error("No match")
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := srs.Forward(tt.email)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("srs.Forward() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("srs.Forward() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 
 }
 
-var (
-	postSRSForward = postsrs("10001")
-	postSRSReverse = postsrs("10002")
-)
+func TestSRS_Reverse(t *testing.T) {
+	// configuration the same as in PostSRS blackbox test
+	var srs = SRS{
+		Secret:         []byte("tops3cr3t"),
+		Domain:         "example.com",
+		FirstSeparator: "=",
+		NowFunc: func() time.Time {
+			return time.Date(2020, time.January, 1, 0, 1, 0, 0, time.UTC)
+		},
+	}
+	tests := []struct {
+		name    string
+		email   string
+		want    string
+		wantErr bool
+	}{
+		{"Recover original mail address from valid SRS0 address", "SRS0=XjO9=2V=otherdomain.com=test@example.com", "test@otherdomain.com", false},
+		{"Recover original SRS0 address from valid SRS1 address", "SRS1=JIBX=thirddomain.com==opaque+string@example.com", "SRS0=opaque+string@thirddomain.com", false},
+		{"Do not rewrite mail address which is not an SRS address", "test@example.com", "", true},
+		{"Reject valid SRS0 address with time stamp older than 6 months", "SRS0=te87=T7=otherdomain.com=test@example.com", "", true},
+		{"Reject valid SRS0 address with time stamp 6 month in the future", "SRS0=VcIb=7N=otherdomain.com=test@example.com", "", true},
+		{"Reject SRS0 address with invalid hash", "SRS0=FAKE=2V=otherdomain.com=test@example.com", "", true},
+		// TODO: {"Recover mail address from all-lowercase SRS0 address", "srs0=xjo9=2v=otherdomain.com=test@example.com", "test@otherdomain.com", false},
+		// TODO: {"Recover mail address from all-uppcase SRS0 address", "SRS0=XJO9=2V=OTHERDOMAIN.COM=TEST@EXAMPLE.COM", "TEST@OTHERDOMAIN.COM", false},
+		{"Reject SRS0 address without authenticating hash", "SRS0=@example.com", "", true},
+		{"Reject SRS0 address without time stamp", "SRS0=XjO9@example.com", "", true},
+		{"Reject SRS0 address without original domain", "SRS0=XjO9=2V@example.com", "", true},
+		{"Reject SRS0 address without original localpart", "SRS0=XjO9=2V=otherdomain.com@example.com", "", true},
+		// TODO: {"Reject Database alias", "SRS0=bxzH=2W=1=DCJGDE6N24LCRT41A4T0G1UIF0DTKKQJ@example.com", "", true},
+		{"Recover long address", "SRS0=G7tR=2W=" + as + ".net=test@example.com", "test@" + as + ".net", false},
+		{"Empty", "", "", true},
+		{"No email", "some random string", "", true},
+		{"No SRS", "something@localhost", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := srs.Reverse(tt.email)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("srs.Forward() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("srs.Forward() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
-func postsrs(port string) func(email string) (code int, fwd string) {
-	return func(email string) (code int, fwd string) {
-		conn, err := net.Dial("tcp", "127.0.0.1:"+port)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer conn.Close()
-
-		fmt.Fprintf(conn, "get %s\n", email)
-		message, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		message = strings.TrimSpace(message)
-		msgParts := strings.SplitN(message, " ", 2)
-		if len(msgParts) < 2 {
-
-		}
-		code, _ = strconv.Atoi(msgParts[0])
-		return code, msgParts[1]
+func TestSRS_setDefaults(t *testing.T) {
+	s := SRS{}
+	s.setDefaults()
+	if s.FirstSeparator != "=" {
+		t.Errorf("s.FistSeparator = %q, want %q", s.FirstSeparator, "=")
+	}
+	if s.NowFunc == nil {
+		t.Errorf("s.NowFunc = nil, want time.Now")
 	}
 }
