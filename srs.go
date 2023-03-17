@@ -74,7 +74,7 @@ func (srs *SRS) Forward(email string) (string, error) {
 		return srs.rewrite(local, hostname)
 	}
 
-	switch local[:5] {
+	switch strings.ToUpper(local[:5]) {
 	case "SRS0=", "SRS0+", "SRS0-":
 		return srs.rewriteSRS0(local, hostname)
 
@@ -199,7 +199,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 		return "", ErrNoSRS
 	}
 
-	switch local[:5] {
+	switch strings.ToUpper(local[:5]) {
 	case "SRS0=", "SRS0+", "SRS0-":
 		_, srsHash, srsTimestamp, srsHost, srsUser, err := srs.parseSRS0(local)
 		if err != nil {
@@ -210,7 +210,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 			return "", err
 		}
 
-		if srsHash != srs.hash([]byte(strings.ToLower(srsTimestamp+srsHost+srsUser))) {
+		if !strings.EqualFold(srsHash, srs.hash([]byte(strings.ToLower(srsTimestamp+srsHost+srsUser)))) {
 			return "", ErrHashInvalid
 		}
 
@@ -222,7 +222,7 @@ func (srs *SRS) Reverse(email string) (string, error) {
 			return "", err
 		}
 
-		if srs1Hash != srs.hash([]byte(strings.ToLower(srs1Host+srsLocal))) {
+		if !strings.EqualFold(srs1Hash, srs.hash([]byte(strings.ToLower(srs1Host+srsLocal)))) {
 			return "", ErrHashInvalid
 		}
 
